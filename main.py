@@ -19,9 +19,9 @@ We also pass a run_name and run_id to .invoke() so each run is easy to
 find in the LangSmith UI by name rather than by timestamp.
 """
 
+import os
 import sys
 import uuid
-import os
 
 from dotenv import load_dotenv
 
@@ -30,16 +30,23 @@ from dotenv import load_dotenv
 # so this must be the very first thing we do.
 load_dotenv()
 
-from langchain_core.runnables import RunnableConfig  # noqa: E402
-from src.graph import app  # noqa: E402
+from langchain_core.runnables import RunnableConfig
+
+from src.cache import SemanticCache
+from src.graph import app
+
+# Initialised once at import time — ChromaDB loads its HNSW index from disk.
+_cache = SemanticCache()
 
 
 def main() -> None:
     """Run the research assistant for a single question.
 
     Reads the question from the first CLI argument, or prompts the user
-    if none is provided.  Invokes the compiled LangGraph app, prints a
-    progress log as each agent runs, and finally prints the answer.
+    if none is provided.  Checks the semantic cache first; if a similar
+    question has been answered before, returns the cached answer without
+    running the graph.  Otherwise invokes the compiled LangGraph app,
+    stores the result in the cache, and prints the answer.
     """
     # Get question from CLI arg or interactive prompt
     if len(sys.argv) > 1:
@@ -54,6 +61,15 @@ def main() -> None:
     print(f"\n{'='*60}")
     print(f"Question: {question}")
     print(f"{'='*60}")
+
+    # --- Semantic cache lookup ---
+    cached_answer = _cache.get(question)
+    if cached_answer:
+        print(f"\n{'='*60}")
+        print("FINAL ANSWER (from cache)")
+        print(f"{'='*60}")
+        print(cached_answer)
+        return
 
     # A unique run_id lets us construct a direct LangSmith trace link.
     # LangGraph forwards this ID to every child span automatically.
@@ -82,20 +98,24 @@ def main() -> None:
     # Invoke the graph — this blocks until END is reached.
     # The print() calls inside each agent node give live progress feedback.
     final_state = app.invoke(initial_state, config=config)
+    answer = final_state["final_answer"] or final_state["draft_answer"]
+
+    # --- Store result in semantic cache ---
+    _cache.set(question, answer)
 
     # Print the answer
     print(f"\n{'='*60}")
     print("FINAL ANSWER")
     print(f"{'='*60}")
-    print(final_state["final_answer"] or final_state["draft_answer"])
+    print(answer)
 
     # LangSmith trace link (only meaningful if tracing is enabled)
     if os.getenv("LANGSMITH_TRACING", "").lower() == "true":
         print(f"\n{'='*60}")
-        print(f"LangSmith trace:")
-        print(f"  Project : {project}")
-        print(f"  Run ID  : {run_id}")
-        print(f"  URL     : https://smith.langchain.com (filter by run ID above)")
+        print("LangSmith trace:")
+        print(f"Project: {project}")
+        print(f"Run ID: {run_id}")
+        print("URL: https://smith.langchain.com (filter by run ID above)")
         print(f"{'='*60}")
 
 

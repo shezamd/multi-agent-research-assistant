@@ -9,6 +9,8 @@ A command-line application where multiple AI agents collaborate to answer a rese
 ```
 User Question
       ↓
+[Semantic Cache]    check if a similar question was answered before
+      ↓ miss
   [Planner]         breaks the question into 2–4 research tasks
       ↓
   [Researchers]     one agent per task, all run in parallel
@@ -16,6 +18,8 @@ User Question
   [Writer]          combines findings into a structured answer
       ↓
   [Critic]          approves the answer or sends it back for revision
+      ↓
+[Semantic Cache]    store result for future similar questions
       ↓
   Final Answer
 ```
@@ -40,6 +44,23 @@ def fan_out_to_researchers(state) -> list[Send]:
         for task in state["tasks"]
     ]
 ```
+
+### Semantic Caching
+
+Before invoking the graph, every question is checked against a persistent semantic cache backed by **ChromaDB**. The question is embedded with a local `sentence-transformers` model (`all-MiniLM-L6-v2`) and compared against stored question embeddings using cosine distance. If a sufficiently similar question has been answered before (distance ≤ 0.15, ≈92% similarity), the cached answer is returned immediately — skipping the entire multi-agent pipeline.
+
+```
+Question → embed → ChromaDB HNSW lookup → distance ≤ 0.15? → return cached answer
+                                         → distance > 0.15? → run graph → store result
+```
+
+Key design choices:
+- **Embeddings are computed on questions, not answers** — similarity is judged on what was asked, not what was said
+- **ChromaDB persists to `.cache/chroma/`** — the cache survives across runs
+- **`upsert` is used for writes** — re-running the same question updates the entry rather than duplicating it
+- **Threshold is configurable** — pass `threshold=` to `SemanticCache()` to make matching stricter or looser
+
+---
 
 ### Critic → Writer Revision Loop
 
@@ -74,12 +95,14 @@ src/
   state.py              # Shared TypedDict that flows through every node
   tools.py              # Mock search tool (swap for Tavily/SerpAPI later)
   graph.py              # StateGraph wiring, routing functions, Send fan-out
+  cache.py              # Semantic cache: ChromaDB + sentence-transformers
   agents/
     planner.py          # Breaks question into tasks (structured output)
     researcher.py       # Searches + summarises one task (parallel via Send)
     writer.py           # Combines summaries into a draft answer
     critic.py           # Reviews draft, approves or requests revision
 main.py                 # CLI entry point
+.cache/chroma/          # Persistent ChromaDB vector store (auto-created)
 ```
 
 ---
@@ -133,5 +156,7 @@ uv run python main.py
 - [LangGraph](https://github.com/langchain-ai/langgraph) — multi-agent graph orchestration
 - [LangSmith](https://smith.langchain.com) — tracing and observability
 - [LangChain Anthropic](https://python.langchain.com/docs/integrations/chat/anthropic/) — Claude integration
+- [ChromaDB](https://www.trychroma.com) — persistent vector store for semantic caching
+- [sentence-transformers](https://www.sbert.net) — local question embeddings (`all-MiniLM-L6-v2`)
 - [uv](https://docs.astral.sh/uv/) — dependency management
 - [python-dotenv](https://github.com/theskumar/python-dotenv) — environment variable loading

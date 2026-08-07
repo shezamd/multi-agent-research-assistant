@@ -5,8 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "chromadb>=0.6.0",
     "langchain-anthropic>=1.5.3",
     "langgraph>=1.2.10",
     "langsmith>=0.10.13",
     "python-dotenv>=1.2.2",
+    "sentence-transformers>=3.0",
 ]
