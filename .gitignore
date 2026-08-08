@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+# Semantic cache (auto-created at runtime, machine-specific)
+.cache/
+
 # Secrets
 .env
